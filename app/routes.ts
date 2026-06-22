@@ -14,6 +14,8 @@ export default [
 		route("partners/:id", "routes/partners.$id.tsx"),
 		route("rfqs", "routes/rfqs.tsx"),
 		route("rfqs/:id", "routes/rfqs.$id.tsx"),
+		route("invoices", "routes/invoices.tsx"),
+		route("invoices/:id", "routes/invoices.$id.tsx"),
 		route("settings", "routes/settings.tsx"),
 	]),
 	// Resource route: stream files (e.g. the logo) out of R2.
