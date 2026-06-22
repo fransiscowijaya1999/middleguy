@@ -1,9 +1,10 @@
 import { asc, eq } from "drizzle-orm";
 import { Form, Link, redirect, useFetcher } from "react-router";
-import { useClearOnSuccess } from "~/components/add-form";
+import { useAutosaveRow, useClearOnSuccess } from "~/components/add-form";
 import { getDb } from "~/db/client";
 import {
 	type InvoiceLine,
+	type ShippingCost,
 	invoiceLines,
 	invoices,
 	partners,
@@ -202,29 +203,31 @@ function LineRow({
 	customerUnitPrice: number;
 	customerLineTotal: number;
 }) {
+	const { fetcher, formRef, markDirty, saveIfDirty } = useAutosaveRow();
+	const del = useFetcher();
 	return (
-		<Form method="post" className="grid grid-cols-[1fr_4rem_6rem_3rem_6rem_6rem_auto] items-center gap-2 py-1">
-			<input type="hidden" name="lineId" value={line.id} />
-			<input name="name" defaultValue={line.name} className={ui.inputSm} />
-			<input name="qty" type="number" step="any" defaultValue={line.qty} className={ui.inputSm} />
-			<input name="unitPrice" type="number" step="0.01" defaultValue={line.unitPrice} className={ui.inputSm} title="Your cost / base" />
-			<label className="flex items-center justify-center" title="Apply markup?">
-				<input type="checkbox" name="markedUp" defaultChecked={line.markedUp} />
-			</label>
+		<div className="grid grid-cols-[1fr_4rem_6rem_3rem_6rem_6rem_auto] items-center gap-2 py-1">
+			<fetcher.Form ref={formRef} method="post" className="contents" onChange={markDirty} onBlur={saveIfDirty}>
+				<input type="hidden" name="intent" value="line-update" />
+				<input type="hidden" name="lineId" value={line.id} />
+				<input name="name" defaultValue={line.name} className={ui.inputSm} />
+				<input name="qty" type="number" step="any" defaultValue={line.qty} className={ui.inputSm} />
+				<input name="unitPrice" type="number" step="0.01" defaultValue={line.unitPrice} className={ui.inputSm} title="Your cost / base" />
+				<label className="flex items-center justify-center" title="Apply markup?">
+					<input type="checkbox" name="markedUp" defaultChecked={line.markedUp} />
+				</label>
+			</fetcher.Form>
 			<div className="text-right text-sm tabular-nums" title="Customer unit price">
 				{formatMoney(customerUnitPrice)}
 			</div>
 			<div className="text-right text-sm font-medium tabular-nums" title="Customer line total">
 				{formatMoney(customerLineTotal)}
 			</div>
-			<div className="flex gap-1">
-				<button type="submit" name="intent" value="line-update" className={ui.btnSecondary}>
-					Save
-				</button>
+			<del.Form method="post" className="contents">
+				<input type="hidden" name="intent" value="line-delete" />
+				<input type="hidden" name="lineId" value={line.id} />
 				<button
 					type="submit"
-					name="intent"
-					value="line-delete"
 					className={ui.btnDanger}
 					onClick={(e) => {
 						if (!confirm("Delete this line?")) e.preventDefault();
@@ -232,8 +235,8 @@ function LineRow({
 				>
 					✕
 				</button>
-			</div>
-		</Form>
+			</del.Form>
+		</div>
 	);
 }
 
@@ -274,6 +277,35 @@ function AddShipForm() {
 				Add
 			</button>
 		</fetcher.Form>
+	);
+}
+
+function ShipRow({ s }: { s: ShippingCost }) {
+	const { fetcher, formRef, markDirty, saveIfDirty } = useAutosaveRow();
+	const del = useFetcher();
+	return (
+		<div className="grid grid-cols-[1fr_1fr_7rem_auto] items-center gap-2 py-1">
+			<fetcher.Form ref={formRef} method="post" className="contents" onChange={markDirty} onBlur={saveIfDirty}>
+				<input type="hidden" name="intent" value="ship-update" />
+				<input type="hidden" name="shipId" value={s.id} />
+				<input name="label" defaultValue={s.label} className={ui.inputSm} />
+				<input name="courier" defaultValue={s.courier} className={ui.inputSm} />
+				<input name="amount" type="number" step="0.01" defaultValue={s.amount} className={`${ui.inputSm} text-right`} />
+			</fetcher.Form>
+			<del.Form method="post" className="contents">
+				<input type="hidden" name="intent" value="ship-delete" />
+				<input type="hidden" name="shipId" value={s.id} />
+				<button
+					type="submit"
+					className={ui.btnDanger}
+					onClick={(e) => {
+						if (!confirm("Delete this shipping entry?")) e.preventDefault();
+					}}
+				>
+					✕
+				</button>
+			</del.Form>
+		</div>
 	);
 }
 
@@ -384,16 +416,7 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 					<div />
 				</div>
 				{shipments.map((s) => (
-					<Form key={s.id} method="post" className="grid grid-cols-[1fr_1fr_7rem_auto] items-center gap-2 py-1">
-						<input type="hidden" name="shipId" value={s.id} />
-						<input name="label" defaultValue={s.label} className={ui.inputSm} />
-						<input name="courier" defaultValue={s.courier} className={ui.inputSm} />
-						<input name="amount" type="number" step="0.01" defaultValue={s.amount} className={`${ui.inputSm} text-right`} />
-						<div className="flex gap-1">
-							<button type="submit" name="intent" value="ship-update" className={ui.btnSecondary}>Save</button>
-							<button type="submit" name="intent" value="ship-delete" className={ui.btnDanger} onClick={(e) => { if (!confirm("Delete this shipping entry?")) e.preventDefault(); }}>✕</button>
-						</div>
-					</Form>
+					<ShipRow key={s.id} s={s} />
 				))}
 				<AddShipForm />
 				<p className="mt-2 text-right text-sm text-gray-600">

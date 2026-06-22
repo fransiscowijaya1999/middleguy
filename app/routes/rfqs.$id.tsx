@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { Form, Link, redirect, useFetcher } from "react-router";
-import { useClearOnSuccess } from "~/components/add-form";
+import { useAutosaveRow, useClearOnSuccess } from "~/components/add-form";
 import { getDb } from "~/db/client";
 import {
 	type RfqItem,
@@ -144,28 +144,30 @@ const estItemTotal = (i: { qty: number; targetPrice: number | null }) =>
 	i.qty * (i.targetPrice ?? 0);
 
 function ItemRow({ item }: { item: RfqItem }) {
+	const { fetcher, formRef, markDirty, saveIfDirty } = useAutosaveRow();
+	const del = useFetcher();
 	return (
-		<Form method="post" className="grid grid-cols-[1fr_5rem_5rem_7rem_auto] gap-2 py-1">
-			<input type="hidden" name="itemId" value={item.id} />
-			<input name="name" defaultValue={item.name} className={ui.inputSm} />
-			<input name="qty" type="number" step="any" defaultValue={item.qty} className={ui.inputSm} />
-			<input name="unit" defaultValue={item.unit} placeholder="unit" className={ui.inputSm} />
-			<input
-				name="targetPrice"
-				type="number"
-				step="0.01"
-				defaultValue={item.targetPrice ?? ""}
-				placeholder="target"
-				className={ui.inputSm}
-			/>
-			<div className="flex gap-1">
-				<button type="submit" name="intent" value="item-update" className={ui.btnSecondary}>
-					Save
-				</button>
+		<div className="grid grid-cols-[1fr_5rem_5rem_7rem_auto] gap-2 py-1">
+			<fetcher.Form ref={formRef} method="post" className="contents" onChange={markDirty} onBlur={saveIfDirty}>
+				<input type="hidden" name="intent" value="item-update" />
+				<input type="hidden" name="itemId" value={item.id} />
+				<input name="name" defaultValue={item.name} className={ui.inputSm} />
+				<input name="qty" type="number" step="any" defaultValue={item.qty} className={ui.inputSm} />
+				<input name="unit" defaultValue={item.unit} placeholder="unit" className={ui.inputSm} />
+				<input
+					name="targetPrice"
+					type="number"
+					step="0.01"
+					defaultValue={item.targetPrice ?? ""}
+					placeholder="target"
+					className={ui.inputSm}
+				/>
+			</fetcher.Form>
+			<del.Form method="post" className="contents">
+				<input type="hidden" name="intent" value="item-delete" />
+				<input type="hidden" name="itemId" value={item.id} />
 				<button
 					type="submit"
-					name="intent"
-					value="item-delete"
 					className={ui.btnDanger}
 					onClick={(e) => {
 						if (!confirm("Delete this item?")) e.preventDefault();
@@ -173,8 +175,8 @@ function ItemRow({ item }: { item: RfqItem }) {
 				>
 					✕
 				</button>
-			</div>
-		</Form>
+			</del.Form>
+		</div>
 	);
 }
 

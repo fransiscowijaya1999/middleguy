@@ -3,6 +3,7 @@
 	"description": "Simple middleman/dropshipping invoice tool: parse a vendor invoice, mark it up, send a clean customer-facing invoice.",
 	"dependencies": {
 		"drizzle-orm": "^0.45.2",
+		"html-to-image": "^1.11.13",
 		"isbot": "5.1.32",
 		"react": "19.2.1",
 		"react-dom": "19.2.1",
@@ -29,7 +30,7 @@
 		"build": "react-router build",
 		"cf-typegen": "wrangler types && react-router typegen",
 		"check": "tsc && react-router build && wrangler deploy --dry-run",
-		"deploy": "wrangler deploy",
+		"deploy": "react-router build && wrangler deploy",
 		"dev": "react-router dev",
 		"preview": "bun run build && vite preview",
 		"typecheck": "bun run cf-typegen && tsc -b && tsc --noEmit -p tsconfig.test.json",
