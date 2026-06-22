@@ -2,6 +2,8 @@ import { NavLink, Outlet } from "react-router";
 
 const navItems = [
 	{ to: "/", label: "Dashboard", end: true },
+	{ to: "/vendors", label: "Vendors" },
+	{ to: "/partners", label: "Partners" },
 	{ to: "/settings", label: "Settings" },
 ];
 
