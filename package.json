@@ -5,6 +5,7 @@
 		"drizzle-orm": "^0.45.2",
 		"html-to-image": "^1.11.13",
 		"isbot": "5.1.32",
+		"jspdf": "^4.2.1",
 		"react": "19.2.1",
 		"react-dom": "19.2.1",
 		"react-router": "7.9.6",

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { CustomerInvoiceData } from "~/lib/customer-invoice";
 import { formatMoney } from "~/lib/money";
+import { shareInvoicePdf } from "./share-invoice.client";
 
 function formatDate(d: Date | string | number) {
 	const date = d instanceof Date ? d : new Date(d);
@@ -19,29 +20,13 @@ export function InvoiceDocument({ data }: { data: CustomerInvoiceData }) {
 		if (!node) return;
 		setSharing(true);
 		try {
-			// Render the invoice card to a PNG so it can be sent as an attachment.
-			const { toBlob } = await import("html-to-image");
-			const blob = await toBlob(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
-			if (!blob) throw new Error("render failed");
-			const fileName = `${invoice.number || "invoice"}.png`;
-			const file = new File([blob], fileName, { type: "image/png" });
-			const nav = navigator as Navigator & {
-				canShare?: (data?: { files?: File[] }) => boolean;
-			};
-			if (nav.canShare?.({ files: [file] })) {
-				// Opens the native share sheet (WhatsApp, etc.) with the image attached.
-				await nav.share({ files: [file], title: invoice.number || "Invoice" });
-			} else {
-				// Fallback (e.g. desktop): download the image to attach manually.
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = fileName;
-				a.click();
-				URL.revokeObjectURL(url);
-			}
+			await shareInvoicePdf(
+				node,
+				`${invoice.number || "invoice"}.pdf`,
+				invoice.number || "Invoice",
+			);
 		} catch {
-			// user cancelled the share sheet, or capture failed — nothing to do
+			// user cancelled the share sheet, or generation failed — nothing to do
 		} finally {
 			setSharing(false);
 		}
@@ -140,7 +125,7 @@ export function InvoiceDocument({ data }: { data: CustomerInvoiceData }) {
 					disabled={sharing}
 					className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
 				>
-					{sharing ? "Preparing…" : "Send (WhatsApp, etc.)"}
+					{sharing ? "Preparing…" : "Send PDF (WhatsApp, etc.)"}
 				</button>
 			</div>
 		</div>

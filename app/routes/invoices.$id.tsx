@@ -309,6 +309,24 @@ function ShipRow({ s }: { s: ShippingCost }) {
 	);
 }
 
+function ReconRow({ line }: { line: InvoiceLine }) {
+	const { fetcher, formRef, markDirty, saveIfDirty } = useAutosaveRow();
+	const mismatch = line.receivedQty != null && line.receivedQty !== line.qty;
+	return (
+		<div className="grid grid-cols-[1fr_5rem_6rem] items-center gap-2 py-1">
+			<div className={`text-sm ${mismatch ? "font-semibold text-red-700" : ""}`}>
+				{line.name || "—"} {mismatch && "⚠"}
+			</div>
+			<div className="text-right text-sm tabular-nums">{line.qty}</div>
+			<fetcher.Form ref={formRef} method="post" className="contents" onChange={markDirty} onBlur={saveIfDirty}>
+				<input type="hidden" name="intent" value="recon-update" />
+				<input type="hidden" name="lineId" value={line.id} />
+				<input name="receivedQty" type="number" step="any" defaultValue={line.receivedQty ?? ""} className={`${ui.inputSm} text-right`} />
+			</fetcher.Form>
+		</div>
+	);
+}
+
 export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin } = loaderData;
 
@@ -500,27 +518,14 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 					When goods arrive, enter what you actually received. Mismatches are
 					flagged.
 				</p>
-				<div className="mt-2 grid grid-cols-[1fr_5rem_6rem_auto] gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+				<div className="mt-2 grid grid-cols-[1fr_5rem_6rem] gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
 					<div>Name</div>
 					<div className="text-right">Ordered</div>
 					<div className="text-right">Received</div>
-					<div />
 				</div>
-				{lines.map((l) => {
-					const mismatch = l.receivedQty != null && l.receivedQty !== l.qty;
-					return (
-						<Form key={l.id} method="post" className="grid grid-cols-[1fr_5rem_6rem_auto] items-center gap-2 py-1">
-							<input type="hidden" name="intent" value="recon-update" />
-							<input type="hidden" name="lineId" value={l.id} />
-							<div className={`text-sm ${mismatch ? "font-semibold text-red-700" : ""}`}>
-								{l.name || "—"} {mismatch && "⚠"}
-							</div>
-							<div className="text-right text-sm tabular-nums">{l.qty}</div>
-							<input name="receivedQty" type="number" step="any" defaultValue={l.receivedQty ?? ""} className={`${ui.inputSm} text-right`} />
-							<button type="submit" name="intent" value="recon-update" className={ui.btnSecondary}>Save</button>
-						</Form>
-					);
-				})}
+				{lines.map((l) => (
+					<ReconRow key={l.id} line={l} />
+				))}
 			</div>
 
 			{/* Danger */}
