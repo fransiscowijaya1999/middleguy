@@ -1,5 +1,7 @@
 import { asc, eq } from "drizzle-orm";
+import { useRef, useState } from "react";
 import { redirect } from "react-router";
+import { shareNodeAsPdf } from "~/components/share-invoice.client";
 import { getDb } from "~/db/client";
 import { rfqItems, rfqSections, rfqs, vendors } from "~/db/schema";
 import { isAuthed } from "~/lib/auth";
@@ -67,6 +69,21 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
 export default function RfqPrint({ loaderData }: Route.ComponentProps) {
 	const { rfq, business, vendor, sections, items } = loaderData;
 	const ungrouped = items.filter((i) => i.sectionId == null);
+	const cardRef = useRef<HTMLDivElement>(null);
+	const [sharing, setSharing] = useState(false);
+
+	async function handleShare() {
+		const node = cardRef.current;
+		if (!node) return;
+		setSharing(true);
+		try {
+			await shareNodeAsPdf(node, `${rfq.title || "rfq"}.pdf`, rfq.title || "RFQ");
+		} catch {
+			// cancelled or failed
+		} finally {
+			setSharing(false);
+		}
+	}
 
 	const ItemsTable = ({ rows }: { rows: typeof items }) => (
 		<table className="w-full border-collapse">
@@ -95,7 +112,7 @@ export default function RfqPrint({ loaderData }: Route.ComponentProps) {
 
 	return (
 		<div className="min-h-screen bg-gray-100 py-8 print:bg-white print:py-0">
-			<div className="mx-auto max-w-2xl bg-white p-8 shadow-sm print:max-w-none print:p-0 print:shadow-none">
+			<div ref={cardRef} className="mx-auto max-w-2xl bg-white p-8 shadow-sm print:max-w-none print:p-0 print:shadow-none">
 				<div className="flex items-start justify-between border-b border-gray-200 pb-6">
 					<div>
 						{business.logoKey && (
@@ -151,15 +168,24 @@ export default function RfqPrint({ loaderData }: Route.ComponentProps) {
 					</div>
 				)}
 
-				<div className="mt-8 text-center print:hidden">
-					<button
-						type="button"
-						onClick={() => window.print()}
-						className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-					>
-						Print / Save as PDF
-					</button>
-				</div>
+			</div>
+
+			<div className="mx-auto mt-4 flex max-w-2xl justify-center gap-2 print:hidden">
+				<button
+					type="button"
+					onClick={() => window.print()}
+					className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+				>
+					Print / Save as PDF
+				</button>
+				<button
+					type="button"
+					onClick={handleShare}
+					disabled={sharing}
+					className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+				>
+					{sharing ? "Preparing…" : "Send PDF (WhatsApp, etc.)"}
+				</button>
 			</div>
 		</div>
 	);

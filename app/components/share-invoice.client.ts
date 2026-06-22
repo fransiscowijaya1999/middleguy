@@ -2,9 +2,9 @@ import { toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 
 // Client-only (`.client.ts`): excluded from the SSR/Worker bundle, so jsPDF and
-// html-to-image never ship to the edge. Renders the invoice node to a single-page
-// PDF and shares it as a file attachment (WhatsApp, etc.), falling back to download.
-export async function shareInvoicePdf(
+// html-to-image never ship to the edge. Renders a DOM node to a single-page PDF
+// and shares it as a file attachment (WhatsApp, etc.), falling back to download.
+export async function shareNodeAsPdf(
 	node: HTMLElement,
 	fileName: string,
 	title: string,

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { CustomerInvoiceData } from "~/lib/customer-invoice";
 import { formatMoney } from "~/lib/money";
-import { shareInvoicePdf } from "./share-invoice.client";
+import { shareNodeAsPdf } from "./share-invoice.client";
 
 function formatDate(d: Date | string | number) {
 	const date = d instanceof Date ? d : new Date(d);
@@ -20,7 +20,7 @@ export function InvoiceDocument({ data }: { data: CustomerInvoiceData }) {
 		if (!node) return;
 		setSharing(true);
 		try {
-			await shareInvoicePdf(
+			await shareNodeAsPdf(
 				node,
 				`${invoice.number || "invoice"}.pdf`,
 				invoice.number || "Invoice",
