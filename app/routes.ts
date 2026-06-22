@@ -21,6 +21,9 @@ export default [
 	// Auth (outside the protected layout).
 	route("login", "routes/login.tsx"),
 	route("logout", "routes/logout.tsx"),
+	// Print/preview pages (auth-checked in their own loaders; no admin nav).
+	route("rfqs/:id/print", "routes/rfqs.$id.print.tsx"),
+	route("invoices/:id/print", "routes/invoices.$id.print.tsx"),
 	// Public, read-only customer invoice (no admin layout).
 	route("i/:token", "routes/i.$token.tsx"),
 	// Resource route: stream files (e.g. the logo) out of R2.

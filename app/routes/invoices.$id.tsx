@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm";
-import { Form, Link, redirect } from "react-router";
+import { Form, Link, redirect, useFetcher } from "react-router";
+import { useClearOnSuccess } from "~/components/add-form";
 import { getDb } from "~/db/client";
 import {
 	type InvoiceLine,
@@ -236,14 +237,59 @@ function LineRow({
 	);
 }
 
+function AddLineForm() {
+	const fetcher = useFetcher<typeof action>();
+	const { formRef, focusRef } = useClearOnSuccess(
+		fetcher.state === "idle" && !!fetcher.data?.ok,
+	);
+	return (
+		<fetcher.Form ref={formRef} method="post" className="mt-2 grid grid-cols-[1fr_4rem_6rem_3rem_6rem_6rem_auto] items-center gap-2 border-t border-gray-100 pt-2">
+			<input type="hidden" name="intent" value="line-add" />
+			<input ref={focusRef} name="name" placeholder="New line (e.g. Shipping)" className={ui.inputSm} />
+			<input name="qty" type="number" step="any" defaultValue={1} className={ui.inputSm} />
+			<input name="unitPrice" type="number" step="0.01" defaultValue={0} className={ui.inputSm} />
+			<label className="flex items-center justify-center" title="Apply markup?">
+				<input type="checkbox" name="markedUp" />
+			</label>
+			<div className="col-span-2 text-right text-xs text-gray-400">manual line</div>
+			<button type="submit" className={ui.btnPrimary} disabled={fetcher.state !== "idle"}>
+				Add
+			</button>
+		</fetcher.Form>
+	);
+}
+
+function AddShipForm() {
+	const fetcher = useFetcher<typeof action>();
+	const { formRef, focusRef } = useClearOnSuccess(
+		fetcher.state === "idle" && !!fetcher.data?.ok,
+	);
+	return (
+		<fetcher.Form ref={formRef} method="post" className="mt-2 grid grid-cols-[1fr_1fr_7rem_auto] items-center gap-2 border-t border-gray-100 pt-2">
+			<input type="hidden" name="intent" value="ship-add" />
+			<input ref={focusRef} name="label" placeholder="e.g. Leg 1" className={ui.inputSm} />
+			<input name="courier" placeholder="Courier" className={ui.inputSm} />
+			<input name="amount" type="number" step="0.01" defaultValue={0} className={`${ui.inputSm} text-right`} />
+			<button type="submit" className={ui.btnPrimary} disabled={fetcher.state !== "idle"}>
+				Add
+			</button>
+		</fetcher.Form>
+	);
+}
+
 export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin } = loaderData;
 
 	return (
 		<div className="max-w-4xl">
-			<Link to="/invoices" className={ui.link}>
-				← Invoices
-			</Link>
+			<div className="flex items-center justify-between">
+				<Link to="/invoices" className={ui.link}>
+					← Invoices
+				</Link>
+				<a href={`/invoices/${invoice.id}/print`} target="_blank" rel="noreferrer" className={ui.btnSecondary}>
+					Print / preview
+				</a>
+			</div>
 			<div className="mt-2 flex items-center gap-3">
 				<h1 className={ui.pageTitle}>{invoice.invoiceNumber || `Invoice #${invoice.id}`}</h1>
 				<span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium capitalize text-gray-700">
@@ -320,17 +366,7 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 				))}
 
 				{/* Add manual line */}
-				<Form method="post" className="mt-2 grid grid-cols-[1fr_4rem_6rem_3rem_6rem_6rem_auto] items-center gap-2 border-t border-gray-100 pt-2">
-					<input type="hidden" name="intent" value="line-add" />
-					<input name="name" placeholder="New line (e.g. Shipping)" className={ui.inputSm} />
-					<input name="qty" type="number" step="any" defaultValue={1} className={ui.inputSm} />
-					<input name="unitPrice" type="number" step="0.01" defaultValue={0} className={ui.inputSm} />
-					<label className="flex items-center justify-center" title="Apply markup?">
-						<input type="checkbox" name="markedUp" />
-					</label>
-					<div className="col-span-2 text-right text-xs text-gray-400">manual line</div>
-					<button type="submit" className={ui.btnPrimary}>Add</button>
-				</Form>
+				<AddLineForm />
 			</div>
 
 			{/* Shipping cost log (internal) */}
@@ -359,13 +395,7 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 						</div>
 					</Form>
 				))}
-				<Form method="post" className="mt-2 grid grid-cols-[1fr_1fr_7rem_auto] items-center gap-2 border-t border-gray-100 pt-2">
-					<input type="hidden" name="intent" value="ship-add" />
-					<input name="label" placeholder="e.g. Leg 1" className={ui.inputSm} />
-					<input name="courier" placeholder="Courier" className={ui.inputSm} />
-					<input name="amount" type="number" step="0.01" defaultValue={0} className={`${ui.inputSm} text-right`} />
-					<button type="submit" className={ui.btnPrimary}>Add</button>
-				</Form>
+				<AddShipForm />
 				<p className="mt-2 text-right text-sm text-gray-600">
 					Shipping paid: <span className="tabular-nums font-medium">{formatMoney(totals.shippingPaid)}</span>
 				</p>

@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm";
-import { Form, Link, redirect } from "react-router";
+import { Form, Link, redirect, useFetcher } from "react-router";
+import { useClearOnSuccess } from "~/components/add-form";
 import { getDb } from "~/db/client";
 import {
 	type RfqItem,
@@ -8,6 +9,7 @@ import {
 	rfqs,
 	vendors,
 } from "~/db/schema";
+import { formatMoney } from "~/lib/money";
 import { ui } from "~/lib/ui";
 import type { Route } from "./+types/rfqs.$id";
 
@@ -138,6 +140,9 @@ export async function action({ request, params, context }: Route.ActionArgs) {
 	return { ok: true as const };
 }
 
+const estItemTotal = (i: { qty: number; targetPrice: number | null }) =>
+	i.qty * (i.targetPrice ?? 0);
+
 function ItemRow({ item }: { item: RfqItem }) {
 	return (
 		<Form method="post" className="grid grid-cols-[1fr_5rem_5rem_7rem_auto] gap-2 py-1">
@@ -174,30 +179,66 @@ function ItemRow({ item }: { item: RfqItem }) {
 }
 
 function AddItemForm({ sectionId }: { sectionId: number | null }) {
+	const fetcher = useFetcher<typeof action>();
+	const { formRef, focusRef } = useClearOnSuccess(
+		fetcher.state === "idle" && !!fetcher.data?.ok,
+	);
 	return (
-		<Form method="post" className="grid grid-cols-[1fr_5rem_5rem_7rem_auto] gap-2 py-1">
+		<fetcher.Form ref={formRef} method="post" className="grid grid-cols-[1fr_5rem_5rem_7rem_auto] gap-2 py-1">
 			<input type="hidden" name="intent" value="item-add" />
 			<input type="hidden" name="sectionId" value={sectionId ?? ""} />
-			<input name="name" placeholder="New item" className={ui.inputSm} />
+			<input ref={focusRef} name="name" placeholder="New item" className={ui.inputSm} />
 			<input name="qty" type="number" step="any" defaultValue={1} className={ui.inputSm} />
 			<input name="unit" placeholder="unit" className={ui.inputSm} />
 			<input name="targetPrice" type="number" step="0.01" placeholder="target" className={ui.inputSm} />
-			<button type="submit" className={ui.btnPrimary}>
+			<button type="submit" className={ui.btnPrimary} disabled={fetcher.state !== "idle"}>
 				Add
 			</button>
-		</Form>
+		</fetcher.Form>
+	);
+}
+
+function AddSectionForm() {
+	const fetcher = useFetcher<typeof action>();
+	const { formRef, focusRef } = useClearOnSuccess(
+		fetcher.state === "idle" && !!fetcher.data?.ok,
+	);
+	return (
+		<fetcher.Form ref={formRef} method="post" className="flex items-center gap-2">
+			<input type="hidden" name="intent" value="section-add" />
+			<input ref={focusRef} name="title" placeholder="New section title" className={`${ui.inputSm} max-w-xs`} />
+			<button type="submit" className={ui.btnPrimary}>
+				Add section
+			</button>
+		</fetcher.Form>
+	);
+}
+
+function SectionSubtotal({ items }: { items: RfqItem[] }) {
+	const subtotal = items.reduce((s, i) => s + estItemTotal(i), 0);
+	if (items.length === 0) return null;
+	return (
+		<p className="mt-1 text-right text-xs text-gray-500">
+			Est. subtotal (target): <span className="tabular-nums font-medium">{formatMoney(subtotal)}</span>
+		</p>
 	);
 }
 
 export default function RfqEditor({ loaderData }: Route.ComponentProps) {
 	const { rfq, sections, items, vendorOptions } = loaderData;
 	const ungrouped = items.filter((i) => i.sectionId == null);
+	const grandEst = items.reduce((s, i) => s + estItemTotal(i), 0);
 
 	return (
 		<div className="max-w-4xl">
-			<Link to="/rfqs" className={ui.link}>
-				← RFQs
-			</Link>
+			<div className="flex items-center justify-between">
+				<Link to="/rfqs" className={ui.link}>
+					← RFQs
+				</Link>
+				<a href={`/rfqs/${rfq.id}/print`} target="_blank" rel="noreferrer" className={ui.btnSecondary}>
+					Print / preview
+				</a>
+			</div>
 			<h1 className={`${ui.pageTitle} mt-2`}>RFQ</h1>
 
 			{/* RFQ meta */}
@@ -250,36 +291,38 @@ export default function RfqEditor({ loaderData }: Route.ComponentProps) {
 
 			{/* Sections + items */}
 			<div className="mt-6 space-y-6">
-				{sections.map((s) => (
-					<div key={s.id} className={ui.card}>
-						<Form method="post" className="flex items-center gap-2">
-							<input type="hidden" name="sectionId" value={s.id} />
-							<input name="title" defaultValue={s.title} className={`${ui.inputSm} max-w-xs font-semibold`} />
-							<button type="submit" name="intent" value="section-update" className={ui.btnSecondary}>
-								Rename
-							</button>
-							<button
-								type="submit"
-								name="intent"
-								value="section-delete"
-								className={ui.btnDanger}
-								onClick={(e) => {
-									if (!confirm("Delete section? Its items become ungrouped.")) e.preventDefault();
-								}}
-							>
-								Delete section
-							</button>
-						</Form>
-						<div className="mt-3">
-							{items
-								.filter((i) => i.sectionId === s.id)
-								.map((i) => (
+				{sections.map((s) => {
+					const sectionItems = items.filter((i) => i.sectionId === s.id);
+					return (
+						<div key={s.id} className={ui.card}>
+							<Form method="post" className="flex items-center gap-2">
+								<input type="hidden" name="sectionId" value={s.id} />
+								<input name="title" defaultValue={s.title} className={`${ui.inputSm} max-w-xs font-semibold`} />
+								<button type="submit" name="intent" value="section-update" className={ui.btnSecondary}>
+									Rename
+								</button>
+								<button
+									type="submit"
+									name="intent"
+									value="section-delete"
+									className={ui.btnDanger}
+									onClick={(e) => {
+										if (!confirm("Delete section? Its items become ungrouped.")) e.preventDefault();
+									}}
+								>
+									Delete section
+								</button>
+							</Form>
+							<div className="mt-3">
+								{sectionItems.map((i) => (
 									<ItemRow key={i.id} item={i} />
 								))}
-							<AddItemForm sectionId={s.id} />
+								<AddItemForm sectionId={s.id} />
+								<SectionSubtotal items={sectionItems} />
+							</div>
 						</div>
-					</div>
-				))}
+					);
+				})}
 
 				{/* Ungrouped items */}
 				<div className={ui.card}>
@@ -289,17 +332,20 @@ export default function RfqEditor({ loaderData }: Route.ComponentProps) {
 							<ItemRow key={i.id} item={i} />
 						))}
 						<AddItemForm sectionId={null} />
+						<SectionSubtotal items={ungrouped} />
 					</div>
 				</div>
 
 				{/* Add section */}
-				<Form method="post" className="flex items-center gap-2">
-					<input type="hidden" name="intent" value="section-add" />
-					<input name="title" placeholder="New section title" className={`${ui.inputSm} max-w-xs`} />
-					<button type="submit" className={ui.btnPrimary}>
-						Add section
-					</button>
-				</Form>
+				<AddSectionForm />
+			</div>
+
+			{/* Estimated total at target prices (internal) */}
+			<div className={`${ui.card} mt-6 flex items-baseline justify-between`}>
+				<span className="text-sm text-gray-600">
+					Estimated total at target prices <span className="text-gray-400">(internal estimate)</span>
+				</span>
+				<span className="text-xl font-bold tabular-nums">{formatMoney(grandEst)}</span>
 			</div>
 
 			<Form method="post" className="mt-10 border-t border-gray-200 pt-4">

@@ -3,7 +3,9 @@
 	"name": "middleguy",
 	"main": "./workers/app.ts",
 	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"observability": {
 		"enabled": true
 	},
@@ -12,7 +14,7 @@
 		{
 			"binding": "DB",
 			"database_name": "middleguy",
-			"database_id": "REPLACE_WITH_REAL_ID_ON_DEPLOY",
+			"database_id": "968423bf-3247-4a4e-88eb-012ec09f1733",
 			"migrations_dir": "drizzle/migrations"
 		}
 	],
@@ -25,7 +27,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "SHARE_LINKS",
-			"id": "REPLACE_WITH_REAL_ID_ON_DEPLOY"
+			"id": "422b85613bfb442eb093d64715108fc2"
 		}
 	],
 	"ai": {
