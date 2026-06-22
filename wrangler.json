@@ -1,0 +1,34 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "middleguy",
+	"main": "./workers/app.ts",
+	"compatibility_date": "2025-10-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "middleguy",
+			"database_id": "REPLACE_WITH_REAL_ID_ON_DEPLOY",
+			"migrations_dir": "drizzle/migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "FILES",
+			"bucket_name": "middleguy-files"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "SHARE_LINKS",
+			"id": "REPLACE_WITH_REAL_ID_ON_DEPLOY"
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	}
+}
