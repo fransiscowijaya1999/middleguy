@@ -35,6 +35,19 @@ values (`wrangler d1 create middleguy`, `wrangler kv namespace create SHARE_LINK
 - Numbers have **no currency symbol**. Always render via `formatMoney(n)` →
   `1,234,567.89` (comma thousands, dot decimal, fixed 2 decimals).
 
+## Auth & privacy (important invariants)
+- Admin routes live under `routes/layout.tsx`, whose loader calls `isAuthed`
+  (`app/lib/auth.ts`) and redirects to `/login`. Single shared password in
+  `ADMIN_PASSWORD`; signed cookie secret in `COOKIE_SECRET` (`.dev.vars` locally,
+  `wrangler secret put` in prod). Production alternative: front the app with
+  Cloudflare Access (zero code) and drop this gate.
+- Public routes (NOT under the layout): `/login`, `/logout`, `/i/:token`, `/files/*`.
+- **The customer view (`routes/i.$token.tsx`) must only ever return customer-facing
+  fields from its loader.** Anything a loader returns is serialized into the page
+  for hydration, so cost (`unitPrice`), `markupPercent`, profit, and the shipping
+  log must never appear in that loader's return value — return pre-computed customer
+  prices only.
+
 ## Pricing rules (core logic — get this right)
 - The customer invoice is a **plain ordered list of lines + grand total**. There is
   **no** auto "shipping/handling" line.

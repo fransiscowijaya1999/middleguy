@@ -32,9 +32,10 @@ export function meta(_: Route.MetaArgs) {
 	return [{ title: "Invoice · middleguy" }];
 }
 
-export async function loader({ params, context }: Route.LoaderArgs) {
+export async function loader({ params, context, request }: Route.LoaderArgs) {
 	const db = getDb(context.cloudflare.env);
 	const id = Number(params.id);
+	const origin = new URL(request.url).origin;
 	const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
 	if (!invoice) throw new Response("Not found", { status: 404 });
 
@@ -64,7 +65,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 		rawText = "";
 	}
 
-	return { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText };
+	return { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin };
 }
 
 export async function action({ request, params, context }: Route.ActionArgs) {
@@ -160,6 +161,29 @@ export async function action({ request, params, context }: Route.ActionArgs) {
 			await db.update(invoices).set(patch).where(eq(invoices.id, id));
 			break;
 		}
+		case "share-create": {
+			const env = context.cloudflare.env;
+			const [inv] = await db
+				.select({ shareToken: invoices.shareToken })
+				.from(invoices)
+				.where(eq(invoices.id, id))
+				.limit(1);
+			const token = inv?.shareToken || crypto.randomUUID().replace(/-/g, "");
+			await env.SHARE_LINKS.put(token, String(id));
+			await db.update(invoices).set({ shareToken: token }).where(eq(invoices.id, id));
+			break;
+		}
+		case "share-revoke": {
+			const env = context.cloudflare.env;
+			const [inv] = await db
+				.select({ shareToken: invoices.shareToken })
+				.from(invoices)
+				.where(eq(invoices.id, id))
+				.limit(1);
+			if (inv?.shareToken) await env.SHARE_LINKS.delete(inv.shareToken);
+			await db.update(invoices).set({ shareToken: null }).where(eq(invoices.id, id));
+			break;
+		}
 		case "invoice-delete": {
 			await db.delete(invoices).where(eq(invoices.id, id));
 			return redirect("/invoices");
@@ -213,7 +237,7 @@ function LineRow({
 }
 
 export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
-	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText } = loaderData;
+	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin } = loaderData;
 
 	return (
 		<div className="max-w-4xl">
@@ -358,6 +382,47 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 					<div className="flex justify-between"><span>− Shipping paid</span><span className="tabular-nums">{formatMoney(totals.shippingPaid)}</span></div>
 					<div className="flex justify-between font-semibold text-white"><span>= Profit</span><span className="tabular-nums">{formatMoney(totals.profit)}</span></div>
 				</div>
+			</div>
+
+			{/* Share */}
+			<div className={`${ui.card} mt-6`}>
+				<h2 className="font-semibold">Customer view & sharing</h2>
+				<p className="text-sm text-gray-500">
+					A read-only page showing only final prices — never your cost, margin, or
+					shipping log.
+				</p>
+				{invoice.shareToken ? (
+					<div className="mt-2 flex flex-wrap items-center gap-2">
+						<input
+							readOnly
+							value={`${origin}/i/${invoice.shareToken}`}
+							onFocus={(e) => e.currentTarget.select()}
+							className={`${ui.inputSm} max-w-md`}
+						/>
+						<a href={`/i/${invoice.shareToken}`} target="_blank" rel="noreferrer" className={ui.btnSecondary}>
+							Open
+						</a>
+						<Form method="post">
+							<button
+								type="submit"
+								name="intent"
+								value="share-revoke"
+								className={ui.btnDanger}
+								onClick={(e) => {
+									if (!confirm("Revoke this share link?")) e.preventDefault();
+								}}
+							>
+								Revoke
+							</button>
+						</Form>
+					</div>
+				) : (
+					<Form method="post" className="mt-2">
+						<button type="submit" name="intent" value="share-create" className={ui.btnPrimary}>
+							Create share link
+						</button>
+					</Form>
+				)}
 			</div>
 
 			{/* Status */}

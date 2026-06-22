@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local dev. In production set these with:
+#   wrangler secret put ADMIN_PASSWORD
+#   wrangler secret put COOKIE_SECRET
+ADMIN_PASSWORD=changeme
+COOKIE_SECRET=please-generate-a-long-random-string
