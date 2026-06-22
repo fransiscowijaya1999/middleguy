@@ -1,0 +1,18 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"types": ["bun"],
+		"lib": ["ES2022"],
+		"target": "ES2022",
+		"module": "ES2022",
+		"moduleResolution": "bundler",
+		"baseUrl": ".",
+		"paths": {
+			"~/*": ["./app/*"]
+		}
+	},
+	"include": ["app/**/*.test.ts"]
+}
