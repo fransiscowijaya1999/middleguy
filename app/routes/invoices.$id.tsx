@@ -11,8 +11,9 @@ import {
 	shippingCosts,
 	vendors,
 } from "~/db/schema";
-import { toBool, toNum, toNullId, toNullNum } from "~/lib/form";
+import { safeFileName, toBool, toNum, toNullId, toNullNum } from "~/lib/form";
 import { formatMoney } from "~/lib/money";
+import { parseInvoice } from "~/lib/parser";
 import { computeInvoiceTotals } from "~/lib/pricing";
 import { ui } from "~/lib/ui";
 import type { Route } from "./+types/invoices.$id";
@@ -67,7 +68,18 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
 		rawText = "";
 	}
 
-	return { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin };
+	// Vendor files: prefer the multi-part list, fall back to the single legacy key.
+	let originalFiles: { key: string; name: string }[] = [];
+	try {
+		if (invoice.originalFileKeys) originalFiles = JSON.parse(invoice.originalFileKeys);
+	} catch {
+		originalFiles = [];
+	}
+	if (originalFiles.length === 0 && invoice.originalFileKey) {
+		originalFiles = [{ key: invoice.originalFileKey, name: "Vendor file" }];
+	}
+
+	return { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, originalFiles, origin };
 }
 
 export async function action({ request, params, context }: Route.ActionArgs) {
@@ -90,6 +102,94 @@ export async function action({ request, params, context }: Route.ActionArgs) {
 				})
 				.where(eq(invoices.id, id));
 			break;
+		}
+		case "files-add": {
+			const env = context.cloudflare.env;
+			const files = form
+				.getAll("file")
+				.filter((f): f is File => f instanceof File && f.size > 0);
+			if (files.length === 0) {
+				return { error: "Choose at least one file (PDF or image) to add." };
+			}
+
+			const [inv] = await db
+				.select({
+					originalFileKey: invoices.originalFileKey,
+					originalFileKeys: invoices.originalFileKeys,
+					parseRaw: invoices.parseRaw,
+				})
+				.from(invoices)
+				.where(eq(invoices.id, id))
+				.limit(1);
+			if (!inv) throw new Response("Not found", { status: 404 });
+
+			// Store every new part in R2.
+			const stamp = Date.now();
+			const stored = await Promise.all(
+				files.map(async (file, i) => {
+					const key = `invoices/${stamp}-${i}-${safeFileName(file.name)}`;
+					await env.FILES.put(key, await file.arrayBuffer(), {
+						httpMetadata: { contentType: file.type || "application/octet-stream" },
+					});
+					return { key, name: file.name };
+				}),
+			);
+
+			// Merge the new parts into the existing file list (handle legacy rows
+			// that only have the single originalFileKey).
+			let existingFiles: { key: string; name: string }[] = [];
+			try {
+				if (inv.originalFileKeys) existingFiles = JSON.parse(inv.originalFileKeys);
+			} catch {
+				existingFiles = [];
+			}
+			if (existingFiles.length === 0 && inv.originalFileKey) {
+				existingFiles = [{ key: inv.originalFileKey, name: "Vendor file" }];
+			}
+			const allFiles = [...existingFiles, ...stored];
+
+			const parsed = await parseInvoice(env, files);
+
+			// Append parsed lines after whatever is already on the invoice.
+			const existingLines = await db
+				.select({ sortOrder: invoiceLines.sortOrder })
+				.from(invoiceLines)
+				.where(eq(invoiceLines.invoiceId, id));
+			const base = existingLines.reduce((m, r) => Math.max(m, r.sortOrder), 0);
+			if (parsed.lines.length > 0) {
+				await db.insert(invoiceLines).values(
+					parsed.lines.map((l, idx) => ({
+						invoiceId: id,
+						name: l.name,
+						qty: l.qty,
+						unitPrice: l.unitPrice,
+						markedUp: true,
+						isManual: false,
+						sortOrder: base + 1 + idx,
+					})),
+				);
+			}
+
+			// Keep the audit trail: append the new OCR text to the stored raw.
+			let prevRaw = "";
+			try {
+				prevRaw = inv.parseRaw ? (JSON.parse(inv.parseRaw).raw ?? "") : "";
+			} catch {
+				prevRaw = "";
+			}
+			const mergedRaw = [prevRaw, parsed.raw].filter(Boolean).join("\n\n");
+
+			await db
+				.update(invoices)
+				.set({
+					originalFileKey: inv.originalFileKey ?? stored[0].key,
+					originalFileKeys: JSON.stringify(allFiles),
+					parseRaw: JSON.stringify({ total: parsed.total, raw: mergedRaw }).slice(0, 200000),
+					updatedAt: new Date(),
+				})
+				.where(eq(invoices.id, id));
+
+			return { ok: true as const, added: parsed.lines.length };
 		}
 		case "line-add": {
 			await db.insert(invoiceLines).values({
@@ -327,8 +427,83 @@ function ReconRow({ line }: { line: InvoiceLine }) {
 	);
 }
 
+function Spinner() {
+	return (
+		<svg
+			className="h-4 w-4 animate-spin"
+			viewBox="0 0 24 24"
+			fill="none"
+			aria-hidden="true"
+		>
+			<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+			<path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+		</svg>
+	);
+}
+
+function AddFilesForm() {
+	const fetcher = useFetcher<typeof action>();
+	const adding = fetcher.state !== "idle";
+	const { formRef } = useClearOnSuccess(
+		fetcher.state === "idle" && !!fetcher.data?.ok,
+	);
+	return (
+		<div className="mt-4 border-t border-gray-100 pt-3">
+			<h3 className="text-sm font-semibold">Add more vendor files</h3>
+			<p className="mt-0.5 text-xs text-gray-500">
+				Upload another batch of photos/PDFs. The parsed line items are appended
+				to this invoice (marked up by the invoice’s margin).
+			</p>
+			{fetcher.data?.error && (
+				<div className={`${ui.error} mt-2`}>{fetcher.data.error}</div>
+			)}
+			{fetcher.state === "idle" && typeof fetcher.data?.added === "number" && (
+				<div className="mt-2 text-sm text-green-700">
+					Added {fetcher.data.added} line{fetcher.data.added === 1 ? "" : "s"}.
+				</div>
+			)}
+			<fetcher.Form
+				ref={formRef}
+				method="post"
+				encType="multipart/form-data"
+				className="mt-2 flex flex-wrap items-center gap-3"
+			>
+				<input type="hidden" name="intent" value="files-add" />
+				<input
+					name="file"
+					type="file"
+					multiple
+					accept="application/pdf,image/*"
+					className="block text-sm"
+				/>
+				<button
+					type="submit"
+					className={ui.btnPrimary}
+					disabled={adding}
+					aria-busy={adding}
+				>
+					{adding ? (
+						<span className="inline-flex items-center gap-2">
+							<Spinner />
+							Uploading & parsing…
+						</span>
+					) : (
+						"Upload & parse"
+					)}
+				</button>
+				{adding && (
+					<span className="text-xs text-gray-500">
+						Reading the files and extracting line items — this can take a few
+						seconds.
+					</span>
+				)}
+			</fetcher.Form>
+		</div>
+	);
+}
+
 export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
-	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, origin } = loaderData;
+	const { invoice, lines, shipments, vendorOptions, partnerOptions, totals, rawText, originalFiles, origin } = loaderData;
 
 	return (
 		<div className="max-w-4xl">
@@ -385,13 +560,23 @@ export default function InvoiceEditor({ loaderData }: Route.ComponentProps) {
 					</div>
 					<button type="submit" className={ui.btnPrimary}>Save details</button>
 				</Form>
-				{invoice.originalFileKey && (
-					<p className="mt-3 text-sm">
-						<a href={`/files/${invoice.originalFileKey}`} target="_blank" rel="noreferrer" className={ui.link}>
-							View original vendor file
-						</a>
-					</p>
+				{originalFiles.length > 0 && (
+					<div className="mt-3 text-sm">
+						<span className="text-gray-500">
+							{originalFiles.length > 1 ? "Original vendor files:" : "Original vendor file:"}
+						</span>
+						<ul className="mt-1 space-y-0.5">
+							{originalFiles.map((f, i) => (
+								<li key={f.key}>
+									<a href={`/files/${f.key}`} target="_blank" rel="noreferrer" className={ui.link}>
+										{f.name || `Part ${i + 1}`}
+									</a>
+								</li>
+							))}
+						</ul>
+					</div>
 				)}
+				<AddFilesForm />
 			</div>
 
 			{/* Lines */}

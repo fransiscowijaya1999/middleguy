@@ -1,5 +1,5 @@
 import { asc, desc, eq } from "drizzle-orm";
-import { Form, Link, redirect } from "react-router";
+import { Form, Link, redirect, useNavigation } from "react-router";
 import { getDb } from "~/db/client";
 import { invoiceLines, invoices, partners, vendors } from "~/db/schema";
 import { safeFileName, toNum, toNullId } from "~/lib/form";
@@ -45,17 +45,26 @@ export async function action({ request, context }: Route.ActionArgs) {
 	const db = getDb(env);
 	const form = await request.formData();
 
-	const file = form.get("file");
-	if (!(file instanceof File) || file.size === 0) {
-		return { error: "Choose an invoice file (PDF or image)." };
+	const files = form
+		.getAll("file")
+		.filter((f): f is File => f instanceof File && f.size > 0);
+	if (files.length === 0) {
+		return { error: "Choose at least one invoice file (PDF or image)." };
 	}
 
-	const key = `invoices/${Date.now()}-${safeFileName(file.name)}`;
-	await env.FILES.put(key, await file.arrayBuffer(), {
-		httpMetadata: { contentType: file.type || "application/octet-stream" },
-	});
+	// A vendor invoice can come split across several parts — store every part.
+	const stamp = Date.now();
+	const stored = await Promise.all(
+		files.map(async (file, i) => {
+			const key = `invoices/${stamp}-${i}-${safeFileName(file.name)}`;
+			await env.FILES.put(key, await file.arrayBuffer(), {
+				httpMetadata: { contentType: file.type || "application/octet-stream" },
+			});
+			return { key, name: file.name };
+		}),
+	);
 
-	const parsed = await parseInvoice(env, file);
+	const parsed = await parseInvoice(env, files);
 
 	const [inv] = await db
 		.insert(invoices)
@@ -64,7 +73,8 @@ export async function action({ request, context }: Route.ActionArgs) {
 			vendorId: toNullId(form.get("vendorId")),
 			partnerId: toNullId(form.get("partnerId")),
 			markupPercent: toNum(form.get("markupPercent"), 0),
-			originalFileKey: key,
+			originalFileKey: stored[0].key,
+			originalFileKeys: JSON.stringify(stored),
 			parseRaw: JSON.stringify({ total: parsed.total, raw: parsed.raw }).slice(0, 200000),
 		})
 		.returning({ id: invoices.id });
@@ -86,10 +96,31 @@ export async function action({ request, context }: Route.ActionArgs) {
 	return redirect(`/invoices/${inv.id}`);
 }
 
+function Spinner() {
+	return (
+		<svg
+			className="h-4 w-4 animate-spin"
+			viewBox="0 0 24 24"
+			fill="none"
+			aria-hidden="true"
+		>
+			<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+			<path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+		</svg>
+	);
+}
+
 export default function Invoices({
 	loaderData,
 	actionData,
 }: Route.ComponentProps) {
+	const navigation = useNavigation();
+	// The upload form does a full POST navigation; the action uploads to R2 and
+	// runs the (slow) AI parse before redirecting. Show progress the whole time.
+	const uploading =
+		navigation.state !== "idle" &&
+		navigation.formMethod?.toLowerCase() === "post";
+
 	return (
 		<div className="max-w-4xl">
 			<h1 className={ui.pageTitle}>Invoices</h1>
@@ -144,17 +175,42 @@ export default function Invoices({
 						</div>
 					</div>
 					<div>
-						<label className={ui.label}>Vendor invoice file</label>
+						<label className={ui.label}>Vendor invoice file(s)</label>
 						<input
 							name="file"
 							type="file"
+							multiple
 							accept="application/pdf,image/*"
 							className="mt-1 block text-sm"
 						/>
+						<p className="mt-1 text-xs text-gray-500">
+							Pick several if the vendor split the invoice into parts — they’re
+							merged into one item list.
+						</p>
 					</div>
-					<button type="submit" className={ui.btnPrimary}>
-						Upload & parse
-					</button>
+					<div className="flex items-center gap-3">
+						<button
+							type="submit"
+							className={ui.btnPrimary}
+							disabled={uploading}
+							aria-busy={uploading}
+						>
+							{uploading ? (
+								<span className="inline-flex items-center gap-2">
+									<Spinner />
+									Uploading & parsing…
+								</span>
+							) : (
+								"Upload & parse"
+							)}
+						</button>
+						{uploading && (
+							<span className="text-sm text-gray-500">
+								Reading the file and extracting line items — this can take a few
+								seconds.
+							</span>
+						)}
+					</div>
 				</Form>
 			</div>
 

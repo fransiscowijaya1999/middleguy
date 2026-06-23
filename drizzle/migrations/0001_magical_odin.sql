@@ -1,0 +1,1 @@
+ALTER TABLE `invoices` ADD `original_file_keys` text;

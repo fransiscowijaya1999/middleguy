@@ -87,7 +87,11 @@ export const invoices = sqliteTable("invoices", {
 		onDelete: "set null",
 	}),
 	invoiceNumber: text("invoice_number").notNull().default(""),
-	originalFileKey: text("original_file_key"), // R2 key of the vendor's invoice
+	originalFileKey: text("original_file_key"), // R2 key of the vendor's invoice (primary/first part)
+	// JSON array of { key, name } for every uploaded part. Vendors sometimes split
+	// one invoice across several photos/PDFs. Null on legacy rows → fall back to
+	// originalFileKey alone.
+	originalFileKeys: text("original_file_keys"),
 	// draft | sent | accepted | partner_paid | vendor_paid | received | settled | cancelled
 	status: text("status").notNull().default("draft"),
 	markupPercent: real("markup_percent").notNull().default(0),

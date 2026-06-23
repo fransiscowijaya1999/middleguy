@@ -4,13 +4,18 @@ import { z } from "zod";
 // swapped (e.g. to the Claude API) without touching callers.
 //
 // Implementation: Workers AI (free).
-//   1. env.AI.toMarkdown() turns a PDF/image into text (OCR for images).
-//   2. A small Llama model extracts structured line items.
+//   1. Turn each part into Markdown text via env.AI.toMarkdown(). This handles
+//      PDFs/docs AND images — toMarkdown OCRs an image into a Markdown table
+//      (wrapped in a short prose caption that the extraction step ignores). We
+//      do NOT use a vision model: @cf/meta/llama-3.2-11b-vision-instruct is gated
+//      behind a one-time license-acceptance step (AiError 5016) and toMarkdown's
+//      OCR is both ungated and higher quality for tabular invoices.
+//   2. A small Llama model extracts structured line items from the combined text.
 //   3. Zod validates; anything unparseable falls back to empty lines + raw text
 //      so the owner can fill it in by hand (free models are rough — always
 //      reviewed before sending).
 
-const MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 const SYSTEM_PROMPT = `You extract line items from a vendor invoice provided as Markdown/OCR text.
 Return ONLY a JSON object of this exact shape, with no commentary:
@@ -50,8 +55,19 @@ type AiLike = {
 	toMarkdown: (
 		docs: { name: string; blob: Blob }[],
 	) => Promise<Array<{ name: string; data: string }>>;
-	run: (model: string, input: unknown) => Promise<{ response?: string } | string>;
+	run: (model: string, input: unknown) => Promise<{ response?: unknown } | string>;
 };
+
+// Turn one invoice part (PDF, doc, or image) into Markdown text. Returns "" on
+// failure so the rest of the invoice (other parts) still parses.
+async function toText(ai: AiLike, file: File, i: number): Promise<string> {
+	try {
+		const md = await ai.toMarkdown([{ name: file.name || `invoice-${i + 1}`, blob: file }]);
+		return md?.[0]?.data ?? "";
+	} catch {
+		return "";
+	}
+}
 
 function extractJson(text: string): unknown {
 	if (!text) return null;
@@ -69,33 +85,61 @@ function extractJson(text: string): unknown {
 
 export async function parseInvoice(
 	env: Env,
-	file: File,
+	files: File | File[],
 ): Promise<ParsedInvoice> {
 	const ai = env.AI as unknown as AiLike;
+	// A vendor invoice may arrive split across several photos/PDFs. We turn each
+	// part into Markdown via toMarkdown (which OCRs images too), then concatenate
+	// and extract line items once over the combined invoice so parts merge into
+	// one item list.
+	const list = (Array.isArray(files) ? files : [files]).filter((f) => f.size > 0);
+	if (list.length === 0) return { lines: [], total: null, raw: "" };
 
-	let raw = "";
-	try {
-		const md = await ai.toMarkdown([{ name: file.name || "invoice", blob: file }]);
-		raw = md?.[0]?.data ?? "";
-	} catch {
-		return { lines: [], total: null, raw: "" };
-	}
+	const texts = await Promise.all(list.map((f, i) => toText(ai, f, i)));
+	const partLabel = (f: File, i: number) => f.name || `Part ${i + 1}`;
+	const raw = list
+		.map((f, i) =>
+			list.length > 1 ? `--- ${partLabel(f, i)} ---\n${texts[i]}` : texts[i],
+		)
+		.join("\n\n")
+		.trim();
 	if (!raw.trim()) return { lines: [], total: null, raw };
 
-	let text = "";
+	// Build the model input with a PER-PART budget. A single global slice lets a
+	// large first part (e.g. one image's OCR) consume the whole window, so the
+	// remaining parts of a multi-image invoice never reach the model and go
+	// unparsed. Splitting the budget guarantees every part is represented.
+	const TOTAL_BUDGET = 24000;
+	const perPart = Math.max(2000, Math.floor(TOTAL_BUDGET / list.length));
+	const modelInput = list
+		.map((f, i) => {
+			const head = list.length > 1 ? `--- ${partLabel(f, i)} ---\n` : "";
+			return head + (texts[i] ?? "").slice(0, perPart);
+		})
+		.join("\n\n")
+		.trim();
+
+	let payload: unknown = null;
 	try {
 		const resp = await ai.run(MODEL, {
 			messages: [
 				{ role: "system", content: SYSTEM_PROMPT },
-				{ role: "user", content: raw.slice(0, 12000) },
+				{ role: "user", content: modelInput },
 			],
+			// Without this, Workers AI caps output at ~256 tokens and truncates the
+			// JSON mid-array on any multi-line invoice, so extraction returns nothing.
+			max_tokens: 8192,
 		});
-		text = typeof resp === "string" ? resp : (resp.response ?? "");
+		// The model's answer lands in `response`. Workers AI returns it as a raw
+		// string when the model wraps it (e.g. in a ```json fence) but as an
+		// already-parsed object when the model emits bare JSON — so handle both.
+		const value = typeof resp === "string" ? resp : resp.response;
+		payload = typeof value === "string" ? extractJson(value) : value;
 	} catch {
 		return { lines: [], total: null, raw };
 	}
 
-	const validated = ParsedSchema.safeParse(extractJson(text));
+	const validated = ParsedSchema.safeParse(payload);
 	if (!validated.success) return { lines: [], total: null, raw };
 
 	return {
