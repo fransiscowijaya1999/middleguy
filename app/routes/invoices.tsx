@@ -1,7 +1,7 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { Form, Link, redirect, useNavigation } from "react-router";
-import { getDb } from "~/db/client";
-import { invoiceLines, invoices, partners, vendors } from "~/db/schema";
+import { getDb, insertInvoiceLines } from "~/db/client";
+import { invoices, partners, vendors } from "~/db/schema";
 import { safeFileName, toNum, toNullId } from "~/lib/form";
 import { parseInvoice } from "~/lib/parser";
 import { getSettings } from "~/lib/settings";
@@ -79,19 +79,18 @@ export async function action({ request, context }: Route.ActionArgs) {
 		})
 		.returning({ id: invoices.id });
 
-	if (parsed.lines.length > 0) {
-		await db.insert(invoiceLines).values(
-			parsed.lines.map((l, idx) => ({
-				invoiceId: inv.id,
-				name: l.name,
-				qty: l.qty,
-				unitPrice: l.unitPrice,
-				markedUp: true,
-				isManual: false,
-				sortOrder: idx,
-			})),
-		);
-	}
+	await insertInvoiceLines(
+		db,
+		parsed.lines.map((l, idx) => ({
+			invoiceId: inv.id,
+			name: l.name,
+			qty: l.qty,
+			unitPrice: l.unitPrice,
+			markedUp: true,
+			isManual: false,
+			sortOrder: idx,
+		})),
+	);
 
 	return redirect(`/invoices/${inv.id}`);
 }

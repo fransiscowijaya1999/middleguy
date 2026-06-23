@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { Form, Link, redirect, useFetcher } from "react-router";
 import { useAutosaveRow, useClearOnSuccess } from "~/components/add-form";
-import { getDb } from "~/db/client";
+import { getDb, insertInvoiceLines } from "~/db/client";
 import {
 	type InvoiceLine,
 	type ShippingCost,
@@ -156,19 +156,18 @@ export async function action({ request, params, context }: Route.ActionArgs) {
 				.from(invoiceLines)
 				.where(eq(invoiceLines.invoiceId, id));
 			const base = existingLines.reduce((m, r) => Math.max(m, r.sortOrder), 0);
-			if (parsed.lines.length > 0) {
-				await db.insert(invoiceLines).values(
-					parsed.lines.map((l, idx) => ({
-						invoiceId: id,
-						name: l.name,
-						qty: l.qty,
-						unitPrice: l.unitPrice,
-						markedUp: true,
-						isManual: false,
-						sortOrder: base + 1 + idx,
-					})),
-				);
-			}
+			await insertInvoiceLines(
+				db,
+				parsed.lines.map((l, idx) => ({
+					invoiceId: id,
+					name: l.name,
+					qty: l.qty,
+					unitPrice: l.unitPrice,
+					markedUp: true,
+					isManual: false,
+					sortOrder: base + 1 + idx,
+				})),
+			);
 
 			// Keep the audit trail: append the new OCR text to the stored raw.
 			let prevRaw = "";
