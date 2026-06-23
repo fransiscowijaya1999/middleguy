@@ -64,9 +64,34 @@ async function toText(ai: AiLike, file: File, i: number): Promise<string> {
 	try {
 		const md = await ai.toMarkdown([{ name: file.name || `invoice-${i + 1}`, blob: file }]);
 		return md?.[0]?.data ?? "";
-	} catch {
+	} catch (err) {
+		console.warn(`[parser] toMarkdown failed for part ${i + 1} (${file.name}):`, err);
 		return "";
 	}
+}
+
+// Convert every invoice part to Markdown text, aligned 1:1 with `files`.
+//
+// We send all parts in a SINGLE toMarkdown call (its documented multi-doc API).
+// The previous code fired one call per file via Promise.all — those run
+// concurrently, hit Workers AI's concurrency/rate limits, and the error was
+// swallowed to "", so every part after the first vanished and only the first
+// file ever got parsed. One batched call avoids that; if it throws we retry
+// SEQUENTIALLY (never concurrently) so a single bad part can't drop the rest.
+async function toTexts(ai: AiLike, files: File[]): Promise<string[]> {
+	const docs = files.map((f, i) => ({ name: f.name || `invoice-${i + 1}`, blob: f }));
+	try {
+		const md = await ai.toMarkdown(docs);
+		const byName = new Map(md.map((m) => [m.name, m.data]));
+		// Prefer matching by the name we sent; fall back to positional order.
+		const out = docs.map((d, i) => byName.get(d.name) ?? md?.[i]?.data ?? "");
+		if (out.some((t) => t.trim())) return out;
+	} catch (err) {
+		console.warn("[parser] batched toMarkdown failed, retrying sequentially:", err);
+	}
+	const out: string[] = [];
+	for (let i = 0; i < files.length; i++) out.push(await toText(ai, files[i], i));
+	return out;
 }
 
 function extractJson(text: string): unknown {
@@ -95,7 +120,11 @@ export async function parseInvoice(
 	const list = (Array.isArray(files) ? files : [files]).filter((f) => f.size > 0);
 	if (list.length === 0) return { lines: [], total: null, raw: "" };
 
-	const texts = await Promise.all(list.map((f, i) => toText(ai, f, i)));
+	const texts = await toTexts(ai, list);
+	console.log(
+		"[parser] parts:",
+		list.map((f, i) => `${f.name || `part ${i + 1}`} (${f.size}b) -> ${texts[i]?.length ?? 0} chars`),
+	);
 	const partLabel = (f: File, i: number) => f.name || `Part ${i + 1}`;
 	const raw = list
 		.map((f, i) =>
@@ -140,7 +169,11 @@ export async function parseInvoice(
 	}
 
 	const validated = ParsedSchema.safeParse(payload);
-	if (!validated.success) return { lines: [], total: null, raw };
+	if (!validated.success) {
+		console.warn("[parser] model output failed validation:", JSON.stringify(payload)?.slice(0, 500));
+		return { lines: [], total: null, raw };
+	}
+	console.log(`[parser] extracted ${validated.data.lines.length} line(s) from ${list.length} part(s)`);
 
 	return {
 		lines: validated.data.lines.map((l) => ({
